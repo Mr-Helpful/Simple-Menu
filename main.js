@@ -94,6 +94,8 @@
     let n = toRem.length-1
     let W = window.innerWidth
     let H = window.innerHeight
+    console.log(W)
+    console.log(H)
     let x0 = W/2 - m*module.menuW
     let x1 = W/2 - n*module.menuW
 
