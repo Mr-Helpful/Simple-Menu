@@ -4,15 +4,19 @@
 
 (function(global){
   let module = global.menu = {}
+  const DefaultF = d => console.log(d)
 
   let menus = {}
-
   let shown = [{style:{}}]
   module.menuW = 200
   module.menuH = 500
+  module.target = document.getElementsByTagName("body")[0]
+
+  module.menus = menus
 
   let style = document.createElement("style")
-  document.getElementsByTagName("head")[0].appendChild(style)
+  // we have to prepend the styling to ensure any later styling overrides it
+  document.getElementsByTagName("head")[0].prepend(style)
   setStyling()
   function setStyling(){
     let w = window.innerWidth, h = window.innerHeight
@@ -34,17 +38,31 @@
     .subItem {
       background-color: white;
       border: dashed black 1px;
-      margin: 5px;
       border-radius: 5px;
+
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      grid-template-columns: 1fr auto;
+
+      margin: 5px;
+      padding: 2px;
     }
 
     .subItem.checked {
       border: solid black 1px;
     }
+
+    .display {
+      background-color: white;
+      border: solid black 1px;
+      border-radius: 5px;
+
+      margin: 2px;
+    }
     `
   }
 
-  module.append = addNode.bind(this, menus)
+  module.append = addNode.bind(this, menus, 2)
 
   /** Selects a submenu from the top-level menu
     * @param {String} name - the name of the submenu to select
@@ -52,10 +70,8 @@
     */
   module.select = selNode.bind(this, menus)
 
-  module.elements = function(target){
-    let div = subElems(menus, target)
-    let clickF = div.onclick
-    div.onclick = _ => {console.log("clicked"); clickF()}
+  module.elements = function(){
+    let div = nodeElems({type:"menu", data:{}, depth:1}, menus)
     div.style.backgroundColor = "red"
     return div
   }
@@ -64,8 +80,6 @@
     * @return {Object} - an object representing the defaults for the menu
     */
   module.defaults = subDefs.bind(this, menus)
-
-  module.selector = addSel.bind(this, menus)
 
   function setShown(depth, elem){
     let toRem = shown.splice(depth)
@@ -83,6 +97,7 @@
     let H = window.innerHeight
     let x0 = W/2 - m*module.menuW
     let x1 = W/2 - n*module.menuW
+
     if(n >= 0){
       T = 500
       toRem.forEach(e => {
@@ -105,20 +120,78 @@
     }, T)
   }
 
+  /** A function used to set the data on a single item
+    * @param {Object} item - the item to set the data for; when used, this is already bound
+    * @param {Object} d - the data to set for the item
+    * @return {Object} - the item with the set data
+    */
+  function setData(priv, node, d){
+    priv.type = guessType(d)
+    if(priv.type != "optn"){
+      removeWords(priv, d)
+    }
+
+    if(priv.type == "menu"){
+      for(k in d){
+        node.append(k).data(d[k])
+      }
+      priv.data = {}
+    } else {
+      priv.func = d.func || DefaultF
+      priv.data = d
+    }
+
+    return node
+  }
+
+  /** Takes a guess as to what selector to use for the data given
+    * @param {Function/Object/String/Integer} data - the data to be guessed for
+    * @return {String} - a string representing the type of selector
+    */
+  function guessType(data){
+    let type = typeof data
+    let has = (obj, arr) => arr.every(v => v in obj)
+
+    if(type != "object") return "optn"
+    if(has(data, ["text"])) return "text"
+    if(has(data, ["default"])) return "drop"
+    if(has(data, ["min", "max"])) return "slde"
+    if(has(data, ["true", "false"])) return "swch"
+    return "menu"
+  }
+
+  function removeWords(priv, data){
+    let restricted = ["hint", "text", "default", "min", "max", "callback"]
+
+    for(k in data){
+      if(restricted.includes(k)){
+        priv[k] = data[k]
+        delete data[k]
+      }
+    }
+  }
+
   /** Adds a new submenu to the top-level menu
     * @param {String} name - the new name of the submenu
     * @return {Object} - the interface of the new submenu
     */
-  function addNode(nodes, name){
+  function addNode(nodes, depth, name){
+    let priv = {}
+    priv.name = name
+    priv.depth = depth
+    priv.func = DefaultF
+
     let items = {}
     nodes[name] = {}
-    nodes[name].append = name => addNode(items, name)
-    nodes[name].select = name => selNode(items, name)
-    nodes[name].remove = _    => delNode(nodes, name)
-    nodes[name].elements = subElems.bind(this, items)
-    nodes[name].defaults = subDefs.bind(this, items)
-    nodes[name].selector = addSel.bind(this, items)
-
+    nodes[name].data = setData.bind(this, priv, nodes[name])
+    nodes[name].hint = setHint.bind(this, priv, nodes[name])
+    nodes[name].callback = setCall.bind(this, priv, nodes[name])
+    nodes[name].append = addNode.bind(this, items, depth+1)
+    nodes[name].select = selNode.bind(this, items)
+    nodes[name].remove = delNode.bind(this, nodes, name)
+    nodes[name].elements = nodeElems.bind(this, priv, items)
+    nodes[name].defaults = subDefs.bind(this, priv, items)
+    nodes[name].data({})
     return nodes[name]
   }
 
@@ -139,44 +212,6 @@
     delete nodes[name]
   }
 
-  module.setShown = function(depth, elem){
-    elem.style.marginTop = `-${module.menuH/2}px`
-    elem.style.marginLeft = `-${module.menuW/2}px`
-    setShown(depth, elem)
-  }
-
-  function subElems(nodes, target, depth = 0){
-    let menu = document.createElement("div")
-    menu.classList.add("subMenu")
-    target.appendChild(menu)
-
-    for(const k in nodes){
-      let optn = nodes[k].elements(target, depth + 1)
-      optn.classList.add("subItem")
-      optn.parentNode = div
-
-      let name = document.createElement("div")
-      name.style.gridRow = "1/ span 1"
-      name.style.gridColumn = "1/ span 1"
-      name.innerText = k
-      optn.appendChild(name)
-      menu.appendChild(optn)
-    }
-
-    let div = document.createElement("div")
-    div.onclick = _ => {
-      let p = div.parentNode
-      Array.from(p.children).forEach(e => {
-        e.classList.remove("checked")
-      })
-      p.selected = div.innerText
-      div.classList.add("checked")
-      setShown(depth, menu)
-    }
-
-    return div
-  }
-
   /** Generates the defaults for some sub-elements
     * @param {Object} nodes - the object representing all the nodes to generate for
     * @return {Object} - an object representing the defaults for the nodes
@@ -189,95 +224,14 @@
     return defaults
   }
 
-  function addSel(nodes, name){
-    let item = {}
-    item.type = "hint"
-    item.name = name
-    item.hint = ""
-    item.data = {}
-    item.key  = null
-    item.func = _ => {}
-
-    nodes[name] = {}
-    nodes[name].hint = setHint.bind(this, item, nodes[name])
-    nodes[name].data = setData.bind(this, item, nodes[name])
-    nodes[name].callback = setCall.bind(this, item, nodes[name])
-    nodes[name].remove = delNode.bind(this, nodes, name)
-    nodes[name].defaults = _ => item.data[item.key]
-    nodes[name].elements = itemElems.bind(this, item)
-
-    return nodes[name]
-  }
-
   /** A function used to set the hint on a single item
     * @param {Object} item - the item to set the hint for; when used, this is already bound
     * @param {String} h - the hint to set for the item
     * @return {Object} - the item with the set hint
     */
-  function setHint(item, node, h){
-    item.data.hint = h
+  function setHint(priv, node, h){
+    priv.hint = h
     return node
-  }
-
-  /** A function used to set the data on a single item
-    * @param {Object} item - the item to set the data for; when used, this is already bound
-    * @param {Object} d - the data to set for the item
-    * @return {Object} - the item with the set data
-    */
-  function setData(item, node, d, k = 0){
-    item.data = d
-    item.type = guessType(d)
-    item.hint = d.hint || item.hint
-    item.key = selectKey(item, d, k)
-    return node
-  }
-
-  function only(arr1, arr2){
-    return arr1.every(v => arr2.includes(v))
-  }
-
-  /** Takes a guess as to what selector to use for the data given
-    * @param {Function/Object/String/Integer} data - the data to be guessed for
-    * @return {String} - a string representing the type of selector
-    */
-  function guessType(data){
-    let type = typeof data
-    let keys = Object.keys(data)
-    if(type != "object") return "optn"
-    if(only(keys, ["hint"])) return "hint"
-    if(only(keys, ["default", "hint"])) return "text"
-    if(only(keys, ["min", "max", "hint"])) return "slde"
-    if(only(keys, ["true", "false", "hint"])) return "swch"
-    return "hint"
-  }
-
-  /** Creates a key used to determine a default value from data
-    * @param {Object} d - the data to be selected from
-    * @param {Function/Integer/String} defTo - the selector to generate a function from
-    * @return {Function} - a function which can be used to determine a default value from data
-    */
-  function selectKey(item, d, k){
-    if(item.type == "optn") return 0
-    if(item.type == "text") return ""
-
-    if(k in d) return k
-    if(typeof k == "number") return toKey(d, k)
-    return toKey(0)
-  }
-
-  /** Returns the key at the index in the data
-    * @param {Integer} k - the index used to select a key
-    * @return {Function} - the key at that index in the data
-    */
-  function toKey(d, k){
-    let keys = Object.keys(d)
-    if(keys.length == 0) return null
-    return keys[k]
-  }
-
-  function setKey(item, k){
-    item.key = k
-    item.func(item.data[k])
   }
 
   function setCall(item, node, f){
@@ -286,119 +240,142 @@
   }
 
   let itemHandlers = {}
-  itemHandlers.hint = hintHandler
+  itemHandlers.optn = _ => _
+  itemHandlers.menu = menuHandler
   itemHandlers.slde = slideHandler
   itemHandlers.swch = switchHandler
   itemHandlers.text = textboxHandler
   itemHandlers.drop = dropdownHandler
-  function itemElems(item){
+  function nodeElems(priv, nodes){
     let div = document.createElement("div")
-    div.style.display = "grid"
-    div.style.gridTemplateRows = "auto auto 1fr"
-    div.style.gridTemplateColumns = "1fr auto"
+    div.classList.add("subItem")
 
-    if(item.data.hint){
+    if(priv.hint){
       let hint = document.createElement("div")
-      hint.innerText = item.data.hint
+      hint.innerText = priv.hint
       hint.style.gridRow = "3/ span 1"
       hint.style.gridColumn = "1/ span 2"
       div.appendChild(hint)
     }
-    itemHandlers[item.type](item, div)
+
+    let emptyMenu = priv.type == "menu" && Object.keys(nodes).length == 0
+    if(!emptyMenu){
+      itemHandlers[priv.type](priv, div, nodes)
+    }
 
     return div
   }
 
-  function hintHandler(){}
+  function menuHandler(priv, div, nodes){
+    let menu = document.createElement("div")
+    menu.classList.add("subMenu")
+    module.target.appendChild(menu)
 
-  function slideHandler(item, elem){
+    div.onclick = _ => {
+      radioSelect(div)
+      setShown(priv.depth, menu)
+    }
+
+    if(priv.depth > 1){
+      let back = document.createElement("div")
+      back.classList.add("subItem")
+      back.style.borderStyle = "solid"
+      back.style.width = "auto"
+      back.innerText = "<"
+      back.onclick = _ => {
+        let N = priv.depth - 1
+        setShown(N, shown[N])
+      }
+      menu.appendChild(back)
+    }
+
+    for(const k in nodes){
+      let optn = nodes[k].elements()
+      optn.classList.add("subItem")
+      optn.parentNode = div
+
+      let name = document.createElement("div")
+      name.style.gridRow = "1/ span 1"
+      name.style.gridColumn = "1/ span 1"
+      name.innerText = k
+      optn.appendChild(name)
+      menu.appendChild(optn)
+    }
+
+    return div
+  }
+
+  function slideHandler(priv, elem){
     let slct = document.createElement("input")
     slct.setAttribute("type", "range")
-    slct.setAttribute("min", item.data.min || 0)
-    slct.setAttribute("max", item.data.max || 100)
-    slct.oninput = _ => item.func(slct.value)
+    slct.setAttribute("min", priv.min)
+    slct.setAttribute("max", priv.max)
+    slct.onmouseup = _ => priv.func(slct.value)
 
     slct.style.gridRow = "2/ span 1"
     slct.style.gridColumn = "1/ span 2"
     elem.appendChild(slct)
   }
 
-  function switchHandler(item, elem){
+  function switchHandler(priv, elem){
     let slct = document.createElement("input")
     slct.setAttribute("type", "checkbox")
-    slct.checked = (item.key === "true")
-    slct.onclick = _ => setKey.call(this, item, slct.checked)
+    slct.checked = (priv.key == "true")
+    slct.onclick = _ => priv.func(priv.data[slct.checked])
 
     slct.style.gridRow = "1/ span 1"
     slct.style.gridColumn = "2/ span 1"
     elem.appendChild(slct)
   }
 
-  function textboxHandler(item, elem){
+  function textboxHandler(priv, elem){
+    let slct = document.createElement("input")
+    slct.classList.add("display")
+    slct.setAttribute("type", "text")
+    slct.setAttribute("value", priv.text)
+    slct.onchange = _ => priv.func(slct.value)
 
+    slct.style.gridRow = "2/ span 1"
+    slct.style.gridColumn = "1/ span 2"
+    elem.appendChild(slct)
   }
 
-  function dropdownHandler(item, elem){
+  function dropdownHandler(priv, div){
     let slct = document.createElement("div")
-    slct.style.width = module.menuW
-    slct.style.maxHeight = module.menuH
-    slct.style.display = "none"
+    slct.classList.add("subMenu")
+    module.target.appendChild(slct)
 
     let disp = document.createElement("div")
+    disp.classList.add("display")
     disp.style.gridRow = "2/ span 1"
     disp.style.gridColumn = "1/ span 2"
-    elem.appendChild(disp)
+    disp.innerText = priv.default
+    div.appendChild(disp)
 
-    let elems = []
-    for(let k in item.data){
+    for(let k in priv.data){
       let optn = document.createElement("div")
+      optn.classList.add("subItem")
       optn.innerText = k
-      optn.onclick = radioSelect.bind(this, item, disp, optn, elems)
-      elems.push(optn)
+      optn.parentNode = slct
+      optn.onclick = _ => {
+        radioSelect(optn)
+        disp.innerText = optn.innerText
+        priv.func(priv.data[optn.innerText])
+      }
       slct.appendChild(optn)
     }
 
-    elem.onclick = "todo"//---------------------------------------------------------------------------------
-  }
-
-  function getDropdown(){
-    let slct = document.createElement("div")
-    this.elems = []
-    for(let k in this.data){
-      let div = document.createElement("div")
-      div.innerText = k
-      div.onclick = radioSelect.bind(this, div)
-      this.elems.push(div)
-      slct.appendChild(div)
+    div.onclick = _ => {
+      radioSelect(div)
+      setShown(priv.depth, slct)
     }
-    return slct
   }
 
-  function radioSelect(item, display, elem, elems){
-    elems.forEach(e => {
+  function radioSelect(elem){
+    let p = elem.parentNode
+    Array.from(p.children).forEach(e => {
       e.classList.remove("checked")
     })
     elem.classList.add("checked")
-    display.innerText = elem.innerText
-    setKey.call(this, item, elem.innerText)
-  }
-
-  function addDropdown(gridElem){
-    let slct = document.createElement("div")
-    this.display = document.createElement("div")
-    this.display.style.gridColumn = "1/ span 2"
-    this.display.style.gridRow = "2/ span 1"
-    gridElem.appendChild(this.display)
-    this.display.innerText = "hello world"
-    /*
-    this.elems = []
-    for(let k in this.data){
-      let div = document.createElement("div")
-      div.innerText = k
-      div.onclick = radioSelect.bind(this, div)
-      this.elems.push(div)
-      slct.appendChild(div)
-    }
-    */
   }
 })(this)
