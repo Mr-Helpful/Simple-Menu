@@ -72,7 +72,6 @@
 
   module.elements = function(){
     let div = nodeElems({type:"menu", data:{}, depth:1}, menus)
-    div.style.backgroundColor = "red"
     return div
   }
 
